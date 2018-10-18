@@ -8,9 +8,6 @@ import datetime
 import tempfile
 from collections import defaultdict
 
-LOG_OUTPUT_FORMATS = ['stdout', 'log', 'csv']
-# Also valid: json, tensorboard
-
 DEBUG = 10
 INFO = 20
 WARN = 30
@@ -74,8 +71,11 @@ class HumanOutputFormat(KVWriter, SeqWriter):
         return s[:20] + '...' if len(s) > 23 else s
 
     def writeseq(self, seq):
-        for arg in seq:
-            self.file.write(arg)
+        seq = list(seq)
+        for (i, elem) in enumerate(seq):
+            self.file.write(elem)
+            if i < len(seq) - 1: # add space unless this is the last one
+                self.file.write(' ')
         self.file.write('\n')
         self.file.flush()
 
@@ -344,8 +344,6 @@ class Logger(object):
             if isinstance(fmt, SeqWriter):
                 fmt.writeseq(map(str, args))
 
-Logger.DEFAULT = Logger.CURRENT = Logger(dir=None, output_formats=[HumanOutputFormat(sys.stdout)])
-
 def configure(dir=None, format_strs=None):
     if dir is None:
         dir = os.getenv('OPENAI_LOGDIR')
@@ -355,13 +353,34 @@ def configure(dir=None, format_strs=None):
     assert isinstance(dir, str)
     os.makedirs(dir, exist_ok=True)
 
+    log_suffix = ''
+    rank = 0
+    # check environment variables here instead of importing mpi4py
+    # to avoid calling MPI_Init() when this module is imported
+    for varname in ['PMI_RANK', 'OMPI_COMM_WORLD_RANK']:
+        if varname in os.environ:
+            rank = int(os.environ[varname])
+    if rank > 0:
+        log_suffix = "-rank%03i" % rank
+
     if format_strs is None:
-        strs = os.getenv('OPENAI_LOG_FORMAT')
-        format_strs = strs.split(',') if strs else LOG_OUTPUT_FORMATS
-    output_formats = [make_output_format(f, dir) for f in format_strs]
+        if rank == 0:
+            format_strs = os.getenv('OPENAI_LOG_FORMAT', 'stdout,log,csv').split(',')
+        else:
+            format_strs = os.getenv('OPENAI_LOG_FORMAT_MPI', 'log').split(',')
+    format_strs = filter(None, format_strs)
+    output_formats = [make_output_format(f, dir, log_suffix) for f in format_strs]
 
     Logger.CURRENT = Logger(dir=dir, output_formats=output_formats)
     log('Logging to %s'%dir)
+
+def _configure_default_logger():
+    format_strs = None
+    # keep the old default of only writing to stdout
+    if 'OPENAI_LOG_FORMAT' not in os.environ:
+        format_strs = ['stdout']
+    configure(format_strs=format_strs)
+    Logger.DEFAULT = Logger.CURRENT
 
 def reset():
     if Logger.CURRENT is not Logger.DEFAULT:
@@ -461,6 +480,9 @@ def read_tb(path):
         for (step, value) in pairs:
             data[step-1, colidx] = value
     return pandas.DataFrame(data, columns=tags)
+
+# configure the default logger on import
+_configure_default_logger()
 
 if __name__ == "__main__":
     _demo()
