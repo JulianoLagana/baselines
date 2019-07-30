@@ -31,7 +31,7 @@ class ShmemVecEnv(VecEnv):
         if spaces:
             observation_space, action_space = spaces
         else:
-            logger.log('Creating dummy env object to get spaces')
+            #logger.log('Creating dummy env object to get spaces')
             with logger.scoped_configure(format_strs=[]):
                 dummy = env_fns[0]()
                 observation_space, action_space = dummy.observation_space, dummy.action_space
@@ -60,7 +60,7 @@ class ShmemVecEnv(VecEnv):
 
     def reset(self):
         if self.waiting_step:
-            logger.warn('Called reset() while waiting for the step to complete')
+            #logger.warn('Called reset() while waiting for the step to complete')
             self.step_wait()
         for pipe in self.parent_pipes:
             pipe.send(('reset', None))
@@ -126,6 +126,7 @@ def _subproc_worker(pipe, parent_pipe, env_fn_wrapper, obs_bufs, obs_shapes, obs
             elif cmd == 'step':
                 obs, reward, done, info = env.step(data)
                 if done:
+                    info['terminal_observation'] = obs  # I added this so we can access the terminal states
                     obs = env.reset()
                 pipe.send((_write_obs(obs), reward, done, info))
             elif cmd == 'render':
@@ -137,5 +138,10 @@ def _subproc_worker(pipe, parent_pipe, env_fn_wrapper, obs_bufs, obs_shapes, obs
                 raise RuntimeError('Got unrecognized cmd %s' % cmd)
     except KeyboardInterrupt:
         print('ShmemVecEnv worker: got KeyboardInterrupt')
+
+    # Added to get rid of annoying messages. No clue why I get them in the first place. Seems related to matplotlib...
+    except EOFError:
+        pass
+
     finally:
         env.close()

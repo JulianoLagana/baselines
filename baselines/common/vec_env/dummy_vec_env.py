@@ -50,6 +50,7 @@ class DummyVecEnv(VecEnv):
 
             obs, self.buf_rews[e], self.buf_dones[e], self.buf_infos[e] = self.envs[e].step(action)
             if self.buf_dones[e]:
+                self.buf_infos[e]['terminal_observation'] = obs  # I added this line to obtain functionality from stable baselines
                 obs = self.envs[e].reset()
             self._save_obs(e, obs)
         return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones),
