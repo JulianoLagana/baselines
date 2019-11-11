@@ -11,7 +11,7 @@ class Monitor(Wrapper):
     EXT = "monitor.csv"
     f = None
 
-    def __init__(self, env, filename, allow_early_resets=False, reset_keywords=(), info_keywords=()):
+    def __init__(self, env, filename, allow_early_resets=False, reset_keywords=(), info_keywords=(), gamma=0.99):
         Wrapper.__init__(self, env=env)
         self.tstart = time.time()
         if filename:
@@ -25,12 +25,14 @@ class Monitor(Wrapper):
         self.info_keywords = info_keywords
         self.allow_early_resets = allow_early_resets
         self.rewards = None
+        self.returns = None
         self.needs_reset = True
         self.episode_rewards = []
         self.episode_lengths = []
         self.episode_times = []
         self.total_steps = 0
         self.current_reset_info = {} # extra info about the current episode, that was passed in during reset()
+        self.gamma = gamma
 
     def reset(self, **kwargs):
         self.reset_state()
@@ -45,6 +47,7 @@ class Monitor(Wrapper):
         if not self.allow_early_resets and not self.needs_reset:
             raise RuntimeError("Tried to reset an environment before done. If you want to allow early resets, wrap your env with Monitor(env, path, allow_early_resets=True)")
         self.rewards = []
+        self.returns = []
         self.needs_reset = False
 
 
@@ -57,11 +60,16 @@ class Monitor(Wrapper):
 
     def update(self, ob, rew, done, info):
         self.rewards.append(rew)
+        self.returns.append( rew * self.gamma**(len(self.rewards)-1) )
         if done:
             self.needs_reset = True
             eprew = sum(self.rewards)
             eplen = len(self.rewards)
-            epinfo = {"r": round(eprew, 6), "l": eplen, "t": round(time.time() - self.tstart, 6)}
+            epg = sum(self.returns)
+            epinfo = {"r": round(eprew, 6),
+                      "l": eplen,
+                      "t": round(time.time() - self.tstart, 6),
+                      "g": round(epg, 6)}
             for k in self.info_keywords:
                 epinfo[k] = info[k]
             self.episode_rewards.append(eprew)
@@ -109,7 +117,7 @@ class ResultsWriter(object):
         if isinstance(header, dict):
             header = '# {} \n'.format(json.dumps(header))
         self.f.write(header)
-        self.logger = csv.DictWriter(self.f, fieldnames=('r', 'l', 't')+tuple(extra_keys))
+        self.logger = csv.DictWriter(self.f, fieldnames=('r', 'g', 'l', 't')+tuple(extra_keys))
         self.logger.writeheader()
         self.f.flush()
 
